@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "countdown",
+  "version": "1.0.0",
+  "identifier": "com.wit.countdown",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:8031",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "countdown",
+        "width": 384,
+        "height": 768,
+        "minWidth": 384,
+        "minHeight": 512,
+        "decorations": false,
+        "maximizable": false,
+        "minimizable": false,
+        "alwaysOnBottom": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "shortDescription": "轻量级倒数与待办",
+    "longDescription": "Countdown 是一个轻量桌面应用，提供倒计时与待办功能，支持重复提醒与本地持久化。",
+    "copyright": "© 2026 Wit",
+    "category": "Utilities"
+  }
+}
