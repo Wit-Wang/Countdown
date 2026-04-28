@@ -10,21 +10,31 @@ const todos = ref<Todo[]>([]);
 const showTodoModal = ref(false);
 const editingTodo = ref<Todo | null>(null);
 
-const sortedTodos = computed(() => {
-  return todos.value.slice().sort((a, b) => dateTimeToTs(a.deadline) - dateTimeToTs(b.deadline));
-});
+const sortedTodos = computed(() =>
+  todos.value.slice().sort((a, b) => dateTimeToTs(a.deadline) - dateTimeToTs(b.deadline))
+);
 
 async function loadTodos() {
   try {
     const res = await invoke<Todo[]>('get_todos');
     todos.value = res || [];
   } catch (e) {
-    console.error('get_todos failed', e);
+    console.error('get_todos', e);
+  }
+}
+
+async function commit(command: string, args: Record<string, unknown>, optimistic: () => void) {
+  try {
+    const ok = await invoke<boolean>(command, args);
+    if (ok) await loadTodos();
+    else optimistic();
+  } catch (e) {
+    console.error(`invoke ${command}`, e);
+    optimistic();
   }
 }
 
 function openTodoModal() {
-  // open as "new" -> clear editing state
   editingTodo.value = null;
   showTodoModal.value = true;
 }
@@ -32,15 +42,7 @@ function closeTodoModal() {
   showTodoModal.value = false;
   editingTodo.value = null;
 }
-async function handleAddTodo({
-  text,
-  deadline,
-  repeat,
-}: {
-  text: string;
-  deadline: DateTime;
-  repeat?: DateTime | null;
-}) {
+async function handleAddTodo({ text, deadline, repeat }: { text: string; deadline: DateTime; repeat?: DateTime | null }) {
   if (editingTodo.value) {
     const updated: Todo = {
       id: editingTodo.value.id,
@@ -49,56 +51,33 @@ async function handleAddTodo({
       repeat: repeat ?? null,
       completed: editingTodo.value.completed,
     };
-    try {
-      const ok = await invoke<boolean>('update_todo', { todo: updated });
-      if (ok) await loadTodos();
-      else todos.value = todos.value.map(t => (t.id === updated.id ? updated : t));
-    } catch (e) {
-      console.error('update_todo failed', e);
+    await commit('update_todo', { todo: updated }, () => {
       todos.value = todos.value.map(t => (t.id === updated.id ? updated : t));
-    }
+    });
     editingTodo.value = null;
   } else {
     const todo: Todo = { id: Date.now(), text, deadline, repeat: repeat ?? null, completed: false };
-    try {
-      const ok = await invoke<boolean>('add_todo', { todo });
-      if (ok) await loadTodos();
-      else todos.value.push(todo);
-    } catch (e) {
-      console.error('add_todo failed', e);
-      todos.value.push(todo);
-    }
+    await commit('add_todo', { todo }, () => todos.value.push(todo));
   }
   closeTodoModal();
 }
 
 async function handleRemove(id: number) {
-  try {
-    const ok = await invoke<boolean>('remove_todo', { id });
-    if (ok) await loadTodos();
-    else todos.value = todos.value.filter(t => t.id !== id);
-  } catch (e) {
-    console.error('remove_todo failed', e);
+  await commit('remove_todo', { id }, () => {
     todos.value = todos.value.filter(t => t.id !== id);
-  }
+  });
 }
-// 完成逻辑：若有 repeat（DateTime interval）则把 deadline += repeat 并更新；否则等同于删除
+
 async function handleComplete(id: number) {
   const t = todos.value.find(x => x.id === id);
   if (!t) return;
   if (t.repeat) {
     const newDeadline = addIntervalToDateTime(t.deadline, t.repeat as DateTime);
     const updated: Todo = { ...t, deadline: newDeadline };
-    try {
-      const ok = await invoke<boolean>('update_todo', { todo: updated });
-      if (ok) await loadTodos();
-      else todos.value = todos.value.map(x => (x.id === updated.id ? updated : x));
-    } catch (e) {
-      console.error('update_todo failed', e);
+    await commit('update_todo', { todo: updated }, () => {
       todos.value = todos.value.map(x => (x.id === updated.id ? updated : x));
-    }
+    });
   } else {
-    // non-repeating: treat completion as delete
     await handleRemove(id);
   }
 }
@@ -115,15 +94,11 @@ const editingInitial = computed(() => {
     repeat: editingTodo.value.repeat ?? undefined,
   };
 });
-// settings and close removed per request
 
-// Smooth wheel-based scrolling for `.todo-list` to create a nicer feel
-let wheelListener: (e: WheelEvent) => void;
-// 调整这两个常量以控制滚动速度与阻尼：
-// `SCROLL_MULTIPLIER` 缩放原始滚轮增量（越小越慢）
-// `SMOOTH_FACTOR` 控制插值步长（越小到达目标越慢）
 const SCROLL_MULTIPLIER = 0.6;
 const SMOOTH_FACTOR = 0.14;
+let wheelListener: (e: WheelEvent) => void;
+
 onMounted(() => {
   loadTodos();
   const el = document.querySelector('.todo-list') as HTMLElement | null;
@@ -132,26 +107,21 @@ onMounted(() => {
   let target = el.scrollTop;
 
   wheelListener = (e: WheelEvent) => {
-    if (e.ctrlKey) return; // allow zoom gestures
+    if (e.ctrlKey) return;
     e.preventDefault();
-    // accumulate target scroll position (apply multiplier to slow the effect)
-    target = Math.max(
-      0,
-      Math.min(el.scrollHeight - el.clientHeight, target + e.deltaY * SCROLL_MULTIPLIER)
-    );
+    target = Math.max(0, Math.min(el.scrollHeight - el.clientHeight, target + e.deltaY * SCROLL_MULTIPLIER));
 
     if (!isAnimating) {
       isAnimating = true;
       const step = () => {
         const current = el.scrollTop;
         const diff = target - current;
-        const delta = diff * SMOOTH_FACTOR; // smoothing factor (smaller = slower)
         if (Math.abs(diff) < 0.5) {
           el.scrollTop = target;
           isAnimating = false;
           return;
         }
-        el.scrollTop = current + delta;
+        el.scrollTop = current + diff * SMOOTH_FACTOR;
         requestAnimationFrame(step);
       };
       requestAnimationFrame(step);
@@ -186,7 +156,7 @@ onUnmounted(() => {
           @edit="openEdit"
           @complete="handleComplete"
         />
-        <div v-if="todos.length === 0" class="empty-tip">点击右下角“+”添加待办事项</div>
+        <div v-if="todos.length === 0" class="empty-tip">点击右下角"+"添加待办事项</div>
       </div>
     </div>
     <TodoModal
@@ -202,15 +172,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.window-btn-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-right: 0;
-  z-index: 1;
-  -webkit-app-region: no-drag;
-}
-/* fixed-right removed; floating new button used instead */
 .iconfont {
   font-family: 'Segoe MDL2 Assets', 'Segoe UI Symbol', 'Segoe UI', Arial, sans-serif;
   font-style: normal;
@@ -222,66 +183,6 @@ onUnmounted(() => {
   user-select: none;
   letter-spacing: 0;
   display: inline-block;
-}
-.window-btn {
-  background: #f5f7fa;
-  border: none;
-  border-radius: 50%;
-  font-size: 18px;
-  color: #222;
-  font-weight: 500;
-  transition:
-    background 0.2s,
-    color 0.2s;
-  outline: none;
-  cursor: pointer;
-  user-select: none;
-  box-sizing: border-box;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  z-index: 1;
-}
-.main-btn {
-  background: #409eff;
-  color: #fff;
-  border-radius: 20px;
-  font-size: 18px;
-  font-weight: 500;
-  width: 100%;
-  height: 40px;
-  margin-top: 16px;
-  border: none;
-  outline: none;
-  cursor: pointer;
-  transition:
-    background 0.2s,
-    color 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  user-select: none;
-  box-sizing: border-box;
-}
-.main-btn:hover {
-  background: #66b1ff;
-  color: #fff;
-}
-.window-btn:hover,
-.modal-btn:hover {
-  background: #e6f0ff;
-  color: #409eff;
-}
-.window-btn.close {
-  color: #222;
-}
-.window-btn.close:hover {
-  background: #e6f0ff;
-  color: #409eff;
 }
 .todo-app.fullscreen {
   position: fixed;
@@ -318,7 +219,7 @@ onUnmounted(() => {
   height: 20px;
   background-color: rgba(230, 230, 230, 0.2);
   z-index: 999;
-  pointer-events: none; /* transparent top layer that doesn't block interactions except handle */
+  pointer-events: none;
 }
 .window-bar-bg {
   position: absolute;
@@ -338,61 +239,24 @@ onUnmounted(() => {
   pointer-events: none;
 }
 .drag-handle {
-  pointer-events: auto; /* the only interactive area in top strip */
+  pointer-events: auto;
   width: 140px;
   height: 8px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.12);
   -webkit-app-region: drag;
 }
-.window-bar > .window-btn {
-  position: relative;
-  z-index: 1;
-}
-.window-btn {
-  background: #f5f7fa;
-  border: none;
-  border-radius: 12px;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  font-size: 22px;
-  cursor: pointer;
-  transition:
-    background 0.2s,
-    color 0.2s;
-  -webkit-app-region: no-drag;
-  user-select: none;
-  color: #222;
-  font-weight: 500;
-  outline: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-}
-.window-btn:hover {
-  background: #e6f0ff;
-  color: #409eff;
-}
-.window-btn.close {
-  color: #222;
-}
-.window-btn.close:hover {
-  background: #e6f0ff;
-  color: #409eff;
-}
 .todo-list {
   position: absolute;
-  top: 20px; /* sit directly under the top 20px strip */
+  top: 20px;
   left: 0;
   right: 0;
   bottom: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE 10+ */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 .todo-list::-webkit-scrollbar {
   width: 0;
@@ -404,7 +268,7 @@ onUnmounted(() => {
   margin-right: auto;
   padding: 12px 12px 32px 12px;
   box-sizing: border-box;
-  padding-top: 0px; /* minimal gap under the top strip removed per request */
+  padding-top: 0px;
 }
 .fab {
   --fab-offset: 20px;
@@ -427,11 +291,6 @@ onUnmounted(() => {
 .fab:hover {
   background: #66b1ff;
 }
-.fab:hover {
-  background: #66b1ff;
-}
-
-/* Global (non-scoped) styles to unify icon/button look and fab offset variable */
 </style>
 
 <style>
@@ -440,14 +299,10 @@ onUnmounted(() => {
   --icon-default: #888;
   --icon-hover: #409eff;
 }
-/* unify svg stroke / icon color */
 .window-btn svg path,
 .icon-btn svg path {
   stroke: var(--icon-default);
-  transition:
-    stroke 0.18s ease,
-    fill 0.18s ease,
-    color 0.18s ease;
+  transition: stroke 0.18s ease, fill 0.18s ease, color 0.18s ease;
 }
 .window-btn:hover svg path,
 .icon-btn:hover svg path,
@@ -456,17 +311,9 @@ onUnmounted(() => {
   stroke: var(--icon-hover) !important;
   color: var(--icon-hover) !important;
 }
-/* ensure iconfont glyphs inherit color */
-.empty-tip {
-  user-select: none;
-  -webkit-user-select: none;
-  -ms-user-select: none;
-}
 .iconfont {
   color: inherit;
 }
-
-/* Global button styles so modal buttons inherit same look */
 .window-btn {
   background: #f5f7fa;
   border: none;
@@ -476,9 +323,7 @@ onUnmounted(() => {
   padding: 0;
   font-size: 22px;
   cursor: pointer;
-  transition:
-    background 0.2s,
-    color 0.2s;
+  transition: background 0.2s, color 0.2s;
   -webkit-app-region: no-drag;
   user-select: none;
   color: #222;
@@ -501,69 +346,33 @@ onUnmounted(() => {
   border: none;
   outline: none;
   cursor: pointer;
-  transition:
-    background 0.2s,
-    color 0.2s;
+  transition: background 0.2s, color 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
   user-select: none;
   box-sizing: border-box;
+  -webkit-app-region: no-drag;
 }
 .icon-btn {
   background: none;
   border: none;
   padding: 0;
   cursor: pointer;
+  -webkit-app-region: no-drag;
 }
-
 .empty-tip {
   text-align: center;
   color: #bbb;
   margin-top: 80px;
   font-size: 18px;
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
 }
-form {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+button {
+  cursor: pointer;
 }
-input[type='datetime-local'] {
-  flex: 1;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
 input,
 button {
   border-radius: 8px;
@@ -576,12 +385,8 @@ button {
   background-color: #ffffff;
   transition: border-color 0.25s;
   box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  outline: none;
 }
-
-button {
-  cursor: pointer;
-}
-
 button:hover {
   border-color: #396cd8;
 }
@@ -589,26 +394,11 @@ button:active {
   border-color: #396cd8;
   background-color: #e8e8e8;
 }
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f6f6f6;
     background-color: #2f2f2f;
   }
-
-  a:hover {
-    color: #24c8db;
-  }
-
   input,
   button {
     color: #ffffff;

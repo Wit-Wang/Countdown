@@ -46,7 +46,6 @@ export function dateFromParts(
 }
 
 export function addIntervalToDateTime(base: DateTime, interval: DateTime): DateTime {
-  // convert base to JS Date, add components from interval, then convert back
   const ts = dateTimeToTs(base);
   const d = new Date(ts);
   d.setFullYear(d.getFullYear() + (interval.year ?? 0));

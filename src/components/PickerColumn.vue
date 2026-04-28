@@ -30,7 +30,7 @@ const props = defineProps({
 const rels = [-2, -1, 0, 1, 2];
 const offset = ref(0);
 const velocity = ref(0);
-const VEL_MAX = 10; // cap max velocity from wheel
+const VEL_MAX = 10;
 let rafId: number | null = null;
 let dragging = false;
 let startY = 0;
@@ -39,11 +39,14 @@ let wheelTimer: number | null = null;
 let wheelActive = false;
 let lastWheelApply = 0;
 
+function getItemDist(rel: number): number {
+  return Math.abs(rel * props.itemHeight + offset.value) / props.itemHeight;
+}
+
 function ensureAnimating() {
   if (rafId != null) return;
 
-  const VEL_THRESHOLD = 0.5; // when below this and not dragging, start snap
-
+  const VEL_THRESHOLD = 0.5;
   const SNAP_MS = 180;
 
   function animateTo(target: number, onDone: () => void) {
@@ -53,7 +56,7 @@ function ensureAnimating() {
 
     function snapStep(now: number) {
       const t = Math.min(1, (now - t0) / SNAP_MS);
-      const ease = 0.5 - 0.5 * Math.cos(Math.PI * t); // easeInOut
+      const ease = 0.5 - 0.5 * Math.cos(Math.PI * t);
       offset.value = start + delta * ease;
       if (t < 1) {
         rafId = requestAnimationFrame(snapStep);
@@ -68,11 +71,9 @@ function ensureAnimating() {
 
   function step() {
     if (!dragging) {
-      // when velocity small, snap to nearest item
       if (Math.abs(velocity.value) < VEL_THRESHOLD) {
         const nearest = Math.round(offset.value / props.itemHeight);
         if (nearest === 0) {
-          // just snap to center
           animateTo(0, () => {
             offset.value = 0;
             velocity.value = 0;
@@ -82,7 +83,6 @@ function ensureAnimating() {
         } else {
           const target = nearest * props.itemHeight;
           animateTo(target, () => {
-            // apply delta to shift logical value, then adjust offset back into range
             props.applyDelta(-nearest);
             offset.value += -nearest * props.itemHeight;
             velocity.value = 0;
@@ -117,11 +117,9 @@ function ensureAnimating() {
 }
 
 function onWheel(e: WheelEvent) {
-  // Normalize wheel and avoid firing multiple logical steps per physical scroll.
   const sign = e.deltaY > 0 ? -1 : 1;
   wheelActive = true;
 
-  // If rapid wheel events come in, only increase velocity slightly.
   const add =
     sign * props.itemHeight * props.sensitivity * Math.min(1.0, Math.abs(e.deltaY) / 100) * 0.5;
   velocity.value += add;
@@ -141,7 +139,7 @@ function onPointerDown(e: PointerEvent) {
   try {
     if (el) el.setPointerCapture(e.pointerId);
   } catch {
-    // ignore
+    /* ignore */
   }
 
   dragging = true;
@@ -172,7 +170,7 @@ function onPointerDown(e: PointerEvent) {
     try {
       if (el) el.releasePointerCapture(e.pointerId);
     } catch {
-      // ignore
+      /* ignore */
     }
 
     window.removeEventListener('pointermove', onMove as any);
@@ -186,10 +184,8 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function itemStyle(rel: number) {
-  const posPx = rel * props.itemHeight + offset.value;
-  const dist = Math.abs(posPx) / props.itemHeight;
-  let opacity = 1 - dist / 2;
-  opacity = Math.max(0, Math.min(1, opacity));
+  const dist = getItemDist(rel);
+  const opacity = Math.max(0, Math.min(1, 1 - dist / 2));
   const scale = 1 - Math.min(0.12, dist * 0.06);
   return {
     opacity: String(opacity),
@@ -198,8 +194,7 @@ function itemStyle(rel: number) {
 }
 
 function itemClass(rel: number) {
-  const posPx = rel * props.itemHeight + offset.value;
-  const dist = Math.abs(posPx) / props.itemHeight;
+  const dist = getItemDist(rel);
   if (dist < 0.5) return 'main';
   if (dist < 1.5) return 'near';
   return 'far';

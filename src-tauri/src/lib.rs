@@ -47,6 +47,15 @@ fn save_todos(todos: &Vec<Todo>) {
     }
 }
 
+fn with_todos<F>(f: F)
+where
+    F: FnOnce(&mut Vec<Todo>),
+{
+    let mut todos = load_todos();
+    f(&mut todos);
+    save_todos(&todos);
+}
+
 #[tauri::command]
 fn get_todos() -> Vec<Todo> {
     load_todos()
@@ -54,33 +63,27 @@ fn get_todos() -> Vec<Todo> {
 
 #[tauri::command]
 fn add_todo(todo: Todo) {
-    let mut todos = load_todos();
-    todos.push(todo);
-    save_todos(&todos);
+    with_todos(|todos| todos.push(todo));
 }
 
 #[tauri::command]
 fn remove_todo(id: u64) {
-    let mut todos = load_todos();
-    todos.retain(|t| t.id != id);
-    save_todos(&todos);
+    with_todos(|todos| todos.retain(|t| t.id != id));
 }
 
 #[tauri::command]
 fn update_todo(updated: Todo) {
-    let mut todos = load_todos();
-    if let Some(t) = todos.iter_mut().find(|t| t.id == updated.id) {
-        *t = updated;
-        save_todos(&todos);
-    }
+    with_todos(|todos| {
+        if let Some(t) = todos.iter_mut().find(|t| t.id == updated.id) {
+            *t = updated;
+        }
+    });
 }
-
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        // wallpaper plugin removed; use native implementations below
         .invoke_handler(tauri::generate_handler![get_todos, add_todo, remove_todo, update_todo])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

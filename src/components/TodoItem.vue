@@ -1,19 +1,14 @@
 <template>
   <div class="todo-card">
-    <!-- 左侧文本区 -->
     <div class="left-section">
-      <!-- 状态标签 -->
       <div class="urgency-label" :style="{ background: urgency.color, color: urgency.textColor }">
         {{ urgency.label }}
       </div>
-      <!-- 主标题 -->
       <div class="main-title">{{ todo.text }}</div>
-      <!-- 副标题区 -->
       <div class="subtitle-area">
         <div class="subtitle">截止时间 | {{ deadlineStr }}</div>
       </div>
     </div>
-    <!-- 右侧信息区 -->
     <div class="right-section">
       <div class="time-info">
         <div class="main-time" :style="{ color: urgency.color }">{{ timeMain }}</div>
@@ -26,22 +21,12 @@
         </button>
         <button class="icon-btn" title="编辑" @click.stop="onEdit">
           <svg viewBox="0 0 24 24" width="16" height="16">
-            <path
-              d="M3 17.25V21h3.75l11.06-11.06-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z"
-              fill="none"
-              stroke="#888"
-              stroke-width="2"
-            />
+            <path d="M3 17.25V21h3.75l11.06-11.06-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="none" stroke="#888" stroke-width="2" />
           </svg>
         </button>
         <button class="icon-btn" title="删除" @click.stop="onRemove">
           <svg viewBox="0 0 24 24" width="16" height="16">
-            <path
-              d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
-              fill="none"
-              stroke="#888"
-              stroke-width="2"
-            />
+            <path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="none" stroke="#888" stroke-width="2" />
           </svg>
         </button>
       </div>
@@ -59,15 +44,9 @@ import { dateTimeToTs, formatDateTime } from '../utils/datetime';
 const props = defineProps<{ todo: Todo }>();
 const emit = defineEmits(['remove', 'edit', 'complete']);
 
-function onRemove() {
-  emit('remove', props.todo.id);
-}
-function onEdit() {
-  emit('edit', props.todo);
-}
-function onComplete() {
-  emit('complete', props.todo.id);
-}
+function onRemove() { emit('remove', props.todo.id); }
+function onEdit() { emit('edit', props.todo); }
+function onComplete() { emit('complete', props.todo.id); }
 
 function getUrgency(deadline: DateTime) {
   const diff = dateTimeToTs(deadline) - now.value;
@@ -86,34 +65,22 @@ function getUrgency(deadline: DateTime) {
 
 function formatCountdown(ms: number) {
   if (ms <= 0) return '0s';
-  const d = Math.floor(ms / (24 * 60 * 60 * 1000));
-  const h = Math.floor((ms % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-  const m = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor((ms % 86400000) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
 
-  if (d >= 10) {
-    return `${d}d ${h}h`;
-  } else if (d <= 0) {
-    return `${h}h ${m}m`;
-  } else if (d <= 0 && h <= 0) {
-    return `${m}m`;
-  }
-  return `${d}d ${h}h ${m}m`;
-}
-
-function formatDate(dt: DateTime) {
-  return formatDateTime(dt);
+  if (d >= 10) return `${d}d ${h}h`;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 const urgency = computed(() => getUrgency(props.todo.deadline));
-const deadlineStr = computed(() => formatDate(props.todo.deadline));
+const deadlineStr = computed(() => formatDateTime(props.todo.deadline));
 
 const timeMain = computed(() => {
   const diff = dateTimeToTs(props.todo.deadline) - now.value;
-  if (urgency.value.type === '已到期') {
-    return formatCountdown(-diff);
-  } else {
-    return formatCountdown(diff);
-  }
+  return formatCountdown(urgency.value.type === '已到期' ? -diff : diff);
 });
 </script>
 
@@ -170,8 +137,6 @@ const timeMain = computed(() => {
   margin-bottom: 12px;
 }
 .subtitle {
-  /* Allow the deadline text to use the full available width and wrap if needed
-     so the date won't be truncated on narrow viewports. */
   width: 100%;
   font-size: 12px;
   color: #888;
