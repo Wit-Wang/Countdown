@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import type { Todo, DateTime } from './types/interface';
 import { dateTimeToTs, addIntervalToDateTime } from './utils/datetime';
+import { toast, showToast } from './utils/toast';
 import TodoItem from './components/TodoItem.vue';
 import TodoModal from './components/TodoModal.vue';
 import { invoke } from '@tauri-apps/api/core';
@@ -9,6 +10,17 @@ import { invoke } from '@tauri-apps/api/core';
 const todos = ref<Todo[]>([]);
 const showTodoModal = ref(false);
 const editingTodo = ref<Todo | null>(null);
+const isMobile = ref(false);
+const isSyncing = ref(false);
+
+function uuidv4(): string {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
 
 const sortedTodos = computed(() =>
   todos.value.slice().sort((a, b) => dateTimeToTs(a.deadline) - dateTimeToTs(b.deadline))
@@ -23,13 +35,26 @@ async function loadTodos() {
   }
 }
 
+async function handleSync() {
+  if (isSyncing.value) return;
+  isSyncing.value = true;
+  try {
+    const res = await invoke<Todo[]>('sync_from_cloud');
+    todos.value = res || [];
+    showToast('同步成功', 'success');
+  } catch (e) {
+    showToast('同步失败：' + (typeof e === 'string' ? e : '网络错误'), 'error');
+  } finally {
+    isSyncing.value = false;
+  }
+}
+
 async function commit(command: string, args: Record<string, unknown>, optimistic: () => void) {
   try {
-    const ok = await invoke<boolean>(command, args);
-    if (ok) await loadTodos();
-    else optimistic();
+    await invoke(command, args);
+    await loadTodos();
   } catch (e) {
-    console.error(`invoke ${command}`, e);
+    showToast('操作失败：' + (typeof e === 'string' ? e : '请重试'), 'error');
     optimistic();
   }
 }
@@ -42,39 +67,42 @@ function closeTodoModal() {
   showTodoModal.value = false;
   editingTodo.value = null;
 }
-async function handleAddTodo({ text, deadline, repeat }: { text: string; deadline: DateTime; repeat?: DateTime | null }) {
+async function handleAddTodo({ text, deadline, repeat, autoExpire, info }: { text: string; deadline: DateTime; repeat?: DateTime | null; autoExpire?: boolean; info?: string }) {
   if (editingTodo.value) {
     const updated: Todo = {
       id: editingTodo.value.id,
       text,
       deadline,
       repeat: repeat ?? null,
+      autoExpire: autoExpire ?? false,
+      info: info || undefined,
       completed: editingTodo.value.completed,
     };
-    await commit('update_todo', { todo: updated }, () => {
+    await commit('update_todo', { updated }, () => {
       todos.value = todos.value.map(t => (t.id === updated.id ? updated : t));
     });
     editingTodo.value = null;
   } else {
-    const todo: Todo = { id: Date.now(), text, deadline, repeat: repeat ?? null, completed: false };
+    const todo: Todo = { id: uuidv4(), text, deadline, repeat: repeat ?? null, autoExpire: autoExpire ?? false, info: info || undefined, completed: false };
     await commit('add_todo', { todo }, () => todos.value.push(todo));
   }
   closeTodoModal();
 }
 
-async function handleRemove(id: number) {
+async function handleRemove(id: string) {
   await commit('remove_todo', { id }, () => {
     todos.value = todos.value.filter(t => t.id !== id);
   });
 }
 
-async function handleComplete(id: number) {
+async function handleComplete(id: string) {
   const t = todos.value.find(x => x.id === id);
   if (!t) return;
   if (t.repeat) {
-    const newDeadline = addIntervalToDateTime(t.deadline, t.repeat as DateTime);
+    if (!t.repeat) return;
+const newDeadline = addIntervalToDateTime(t.deadline, t.repeat);
     const updated: Todo = { ...t, deadline: newDeadline };
-    await commit('update_todo', { todo: updated }, () => {
+    await commit('update_todo', { updated }, () => {
       todos.value = todos.value.map(x => (x.id === updated.id ? updated : x));
     });
   } else {
@@ -86,12 +114,31 @@ function openEdit(todo: Todo) {
   showTodoModal.value = true;
 }
 
+async function handleAutoExpire() {
+  const now = Date.now();
+  for (const t of todos.value) {
+    if (!t.autoExpire) continue;
+    if (dateTimeToTs(t.deadline) > now) continue;
+    if (t.repeat) {
+      const newDeadline = addIntervalToDateTime(t.deadline, t.repeat);
+      const updated: Todo = { ...t, deadline: newDeadline };
+      await commit('update_todo', { updated }, () => {
+        todos.value = todos.value.map(x => (x.id === updated.id ? updated : x));
+      });
+    } else {
+      await handleRemove(t.id);
+    }
+  }
+}
+
 const editingInitial = computed(() => {
   if (!editingTodo.value) return undefined;
   return {
     text: editingTodo.value.text,
     deadline: editingTodo.value.deadline,
     repeat: editingTodo.value.repeat ?? undefined,
+    autoExpire: editingTodo.value.autoExpire,
+    info: editingTodo.value.info,
   };
 });
 
@@ -100,7 +147,15 @@ const SMOOTH_FACTOR = 0.14;
 let wheelListener: (e: WheelEvent) => void;
 
 onMounted(() => {
-  loadTodos();
+  loadTodos().then(() => handleAutoExpire());
+  isMobile.value = /android|ios|iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (isMobile.value) {
+    import('@tauri-apps/api/app').then(({ onBackButtonPress }) => {
+      onBackButtonPress(() => {
+        if (showTodoModal.value) closeTodoModal();
+      });
+    });
+  }
   const el = document.querySelector('.todo-list') as HTMLElement | null;
   if (!el) return;
   let isAnimating = false;
@@ -137,8 +192,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="todo-app fullscreen">
-    <div class="header-row">
+  <div class="todo-app fullscreen" :class="{ mobile: isMobile }">
+    <div v-if="!isMobile" class="header-row">
       <div class="window-bar" @dblclick.prevent>
         <div class="window-bar-bg" />
         <div class="drag-wrap">
@@ -165,25 +220,25 @@ onUnmounted(() => {
       @submit="handleAddTodo"
       @close="closeTodoModal"
     />
-    <button v-show="!showTodoModal" class="fab" @click.stop="openTodoModal" title="新建">
-      <span class="iconfont">&#xE710;</span>
+    <button v-show="!showTodoModal" class="fab-sync" :class="{ syncing: isSyncing }" @click.stop="handleSync" :title="isSyncing ? '同步中…' : '从云端刷新'">
+      <span class="sync-icon-wrap">
+        <svg viewBox="0 0 24 24" class="sync-svg">
+          <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+        </svg>
+      </span>
     </button>
+    <button v-show="!showTodoModal" class="fab" @click.stop="openTodoModal" title="新建">
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="#fff">
+        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+      </svg>
+    </button>
+    <Transition name="toast">
+      <div v-if="toast.show" class="toast" :class="toast.type">{{ toast.msg }}</div>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
-.iconfont {
-  font-family: 'Segoe MDL2 Assets', 'Segoe UI Symbol', 'Segoe UI', Arial, sans-serif;
-  font-style: normal;
-  font-weight: normal;
-  font-size: 18px;
-  line-height: 1;
-  vertical-align: middle;
-  pointer-events: none;
-  user-select: none;
-  letter-spacing: 0;
-  display: inline-block;
-}
 .todo-app.fullscreen {
   position: fixed;
   left: 0;
@@ -196,7 +251,7 @@ onUnmounted(() => {
   border-radius: 0;
   box-shadow: none;
   margin: 0;
-  padding: 0 0 24px 0;
+  padding: 0;
   z-index: 1;
   display: flex;
   flex-direction: column;
@@ -258,6 +313,9 @@ onUnmounted(() => {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
+.todo-app.mobile .todo-list {
+  top: 0;
+}
 .todo-list::-webkit-scrollbar {
   width: 0;
   height: 0;
@@ -266,9 +324,8 @@ onUnmounted(() => {
   max-width: 600px;
   margin-left: auto;
   margin-right: auto;
-  padding: 12px 12px 32px 12px;
+  padding: 4px 12px 24px 12px;
   box-sizing: border-box;
-  padding-top: 0px;
 }
 .fab {
   --fab-offset: 20px;
@@ -291,6 +348,65 @@ onUnmounted(() => {
 .fab:hover {
   background: #66b1ff;
 }
+.fab-sync {
+  --fab-offset: 20px;
+  position: fixed;
+  right: calc(var(--fab-offset) + 56px + 12px);
+  bottom: var(--fab-offset);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #f0f2f5;
+  color: #333;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+  border: none;
+  z-index: 1001;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.fab-sync:hover {
+  background: #e4e7ed;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+.fab-sync .sync-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+}
+.fab-sync .sync-svg {
+  width: 30px;
+  height: 30px;
+  fill: #333;
+}
+.fab-sync.syncing .sync-icon-wrap {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.toast {
+  position: fixed;
+  top: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+}
+.toast.success { background: #e8f5e9; color: #2e7d32; }
+.toast.error   { background: #fce4ec; color: #c62828; }
+.toast.info    { background: #e3f2fd; color: #1565c0; }
 </style>
 
 <style>
@@ -310,9 +426,6 @@ onUnmounted(() => {
 .icon-btn:hover {
   stroke: var(--icon-hover) !important;
   color: var(--icon-hover) !important;
-}
-.iconfont {
-  color: inherit;
 }
 .window-btn {
   background: #f5f7fa;
@@ -408,4 +521,8 @@ button:active {
     background-color: #0f0f0f69;
   }
 }
+.toast-enter-active { transition: opacity 0.25s ease, transform 0.25s ease; }
+.toast-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.toast-enter-from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+.toast-leave-to   { opacity: 0; transform: translateX(-50%) translateY(-10px); }
 </style>

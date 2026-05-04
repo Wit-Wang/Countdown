@@ -64,7 +64,7 @@ function getUrgency(deadline: DateTime) {
 }
 
 function formatCountdown(ms: number) {
-  if (ms <= 0) return '0s';
+  if (ms <= 0) return '0m';
   const d = Math.floor(ms / 86400000);
   const h = Math.floor((ms % 86400000) / 3600000);
   const m = Math.floor((ms % 3600000) / 60000);
@@ -80,7 +80,10 @@ const deadlineStr = computed(() => formatDateTime(props.todo.deadline));
 
 const timeMain = computed(() => {
   const diff = dateTimeToTs(props.todo.deadline) - now.value;
-  return formatCountdown(urgency.value.type === '已到期' ? -diff : diff);
+  const isExpired = urgency.value.type === '已到期';
+  const formatted = formatCountdown(diff < 0 ? -diff : diff);
+  if (formatted === '0m') return isExpired ? '过期' : '0m';
+  return (isExpired ? '-' : '') + formatted;
 });
 </script>
 
@@ -89,19 +92,18 @@ const timeMain = computed(() => {
   background: rgba(255, 255, 255, 0.92);
   border-radius: 12px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.07);
-  margin: 16px 0;
-  padding: 16px 20px;
+  margin: 14px 0;
+  padding: 18px 20px;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
   display: flex;
   flex-direction: row;
-  justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   position: relative;
 }
 .left-section {
-  flex: 7;
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -118,15 +120,16 @@ const timeMain = computed(() => {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
   letter-spacing: 1px;
   overflow: hidden;
+  line-height: 1.6;
 }
 .main-title {
-  font-size: 18px;
+  font-size: 17px;
   color: #222;
   font-weight: bold;
   margin-bottom: 6px;
   max-width: 100%;
   word-break: break-all;
-  line-height: 1.3;
+  line-height: 1.4;
   display: -webkit-box;
   line-clamp: 2;
   -webkit-line-clamp: 2;
@@ -134,30 +137,29 @@ const timeMain = computed(() => {
   overflow: hidden;
 }
 .subtitle-area {
-  margin-bottom: 12px;
+  margin-bottom: 0;
 }
 .subtitle {
   width: 100%;
   font-size: 12px;
   color: #888;
-  line-height: 1.2;
+  line-height: 1.4;
   white-space: normal;
   overflow: visible;
   text-overflow: unset;
   word-break: normal;
 }
 .right-section {
-  flex: 3;
-  min-width: 120px;
+  flex-shrink: 0;
+  margin-left: 16px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  justify-content: flex-start;
-  margin-left: 16px;
+  justify-content: center;
+  gap: 8px;
 }
 .time-info {
   text-align: right;
-  margin-bottom: 8px;
   width: 100%;
 }
 .main-time {
@@ -173,8 +175,8 @@ const timeMain = computed(() => {
   gap: 8px;
 }
 .icon-btn {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border: none;
   background: none;
   padding: 0;

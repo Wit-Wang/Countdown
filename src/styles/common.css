@@ -58,3 +58,19 @@ input, textarea, select, .modal-input {
 }
 
 /* Keep this file minimal: only truly shared rules go here */
+
+/* Safe area insets for notched mobile devices */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .todo-list-inner {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom)) !important;
+  }
+  .todo-app.mobile .todo-list-inner {
+    padding-top: calc(4px + env(safe-area-inset-top)) !important;
+  }
+  .fab {
+    bottom: calc(var(--fab-offset) + env(safe-area-inset-bottom)) !important;
+  }
+  .fab-sync {
+    bottom: calc(var(--fab-offset) + env(safe-area-inset-bottom)) !important;
+  }
+}

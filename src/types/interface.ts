@@ -1,9 +1,12 @@
 export interface Todo {
-  id: number;
+  id: string;
   text: string;
   deadline: DateTime;
   repeat?: DateTime | null;
+  autoExpire: boolean;
+  info?: string;
   completed: boolean;
+  updatedAt?: number;
 }
 
 export interface DateTime {

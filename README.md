@@ -107,3 +107,32 @@ https://creativecommons.org/licenses/by-nc-sa/4.0/。
 - [ ] 使应用始终位于桌面层
 - [ ] 添加设置界面（如默认重复间隔、主题、各个紧急度区分等）
 - [ ] 减少内存占用（如使用虚拟列表等）
+- [ ] Bug fix: 如果删除全部待办再同步会有奇怪的反应
+
+# structure:
+总体架构
+┌─ Tauri App ──────────────────────────┐
+│                                      │
+│  前端 Vue → invoke                    │
+│       ↓                              │
+│  Rust 命令层                          │
+│    ├─ 操作本地 todos.json（已有）       │
+│    └─ 同步时 → HTTP POST → Cloudflare │
+│                                       │
+└───────────────────────────────────────┘
+                  │ HTTPS + Token
+                  ▼
+┌─ Cloudflare ─────────────────────────┐
+│                                      │
+│  Worker                              │
+│    ├─ 校验 X-Api-Token                │
+│    ├─ GET /todos          → DO       │
+│    ├─ POST /todos         → DO       │
+│    ├─ DELETE /todos/:id   → DO       │
+│    └─ PUT /todos/:id      → DO       │
+│                                      │
+│  Durable Object                      │
+│    └─ 内置存储 (state.storage)        │
+│       └─ Map<id, Todo> → KV 持久化    │
+│                                      │
+└──────────────────────────────────────┘

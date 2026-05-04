@@ -1,15 +1,17 @@
 <template>
-  <div class="roller-col" @wheel.prevent="onWheel" @pointerdown="onPointerDown">
-    <div class="roller-items" :style="{ transform: `translateY(${offset}px)` }">
-      <label
-        v-for="rel in rels"
-        :key="rel"
-        class="roller-label roller-item"
-        :class="itemClass(rel)"
-        :style="itemStyle(rel)"
-      >
-        {{ getLabel(rel) }}
-      </label>
+  <div class="roller-col" :style="{ '--item-h': itemHeight + 'px' }">
+    <div class="roller-viewport" ref="viewportRef" @wheel="onWheel">
+      <div class="roller-track">
+        <div
+          v-for="(label, index) in tripleLabels"
+          :key="index"
+          class="roller-item"
+          :class="itemClass(index)"
+          :style="itemStyle(index)"
+        >
+          {{ label }}
+        </div>
+      </div>
     </div>
     <span class="roller-unit" v-if="unit">{{ unit }}</span>
     <div class="picker-frame" aria-hidden="true" />
@@ -17,191 +19,158 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onBeforeUnmount, type PropType } from 'vue';
+import { computed, ref, watch, onMounted, onBeforeUnmount, type PropType } from 'vue';
 
 const props = defineProps({
-  getLabel: { type: Function as PropType<(rel: number) => string>, required: true },
-  applyDelta: { type: Function as PropType<(delta: number) => void>, required: true },
+  labels: { type: Array as PropType<string[]>, required: true },
+  modelValue: { type: Number, required: true },
   itemHeight: { type: Number, default: 36 },
-  sensitivity: { type: Number, default: 0.15 },
   unit: { type: String, default: '' },
 });
+const emit = defineEmits(['update:modelValue']);
 
-const rels = [-2, -1, 0, 1, 2];
-const offset = ref(0);
-const velocity = ref(0);
-const VEL_MAX = 10;
-let rafId: number | null = null;
-let dragging = false;
-let startY = 0;
-let lastY = 0;
-let wheelTimer: number | null = null;
-let wheelActive = false;
-let lastWheelApply = 0;
+const viewportRef = ref<HTMLElement | null>(null);
+const scrollTop = ref(0);
+let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+let animId: number | null = null;
+let touching = false;
+let lastWheelTs = 0;
 
-function getItemDist(rel: number): number {
-  return Math.abs(rel * props.itemHeight + offset.value) / props.itemHeight;
-}
+const total = computed(() => props.labels.length);
+const tripleLabels = computed(() => [...props.labels, ...props.labels, ...props.labels]);
 
-function ensureAnimating() {
-  if (rafId != null) return;
-
-  const VEL_THRESHOLD = 0.5;
-  const SNAP_MS = 180;
-
-  function animateTo(target: number, onDone: () => void) {
-    const start = offset.value;
-    const delta = target - start;
-    const t0 = performance.now();
-
-    function snapStep(now: number) {
-      const t = Math.min(1, (now - t0) / SNAP_MS);
-      const ease = 0.5 - 0.5 * Math.cos(Math.PI * t);
-      offset.value = start + delta * ease;
-      if (t < 1) {
-        rafId = requestAnimationFrame(snapStep);
-      } else {
-        rafId = null;
-        onDone();
-      }
-    }
-
-    rafId = requestAnimationFrame(snapStep);
-  }
-
-  function step() {
-    if (!dragging) {
-      if (Math.abs(velocity.value) < VEL_THRESHOLD) {
-        const nearest = Math.round(offset.value / props.itemHeight);
-        if (nearest === 0) {
-          animateTo(0, () => {
-            offset.value = 0;
-            velocity.value = 0;
-            rafId = null;
-          });
-          return;
-        } else {
-          const target = nearest * props.itemHeight;
-          animateTo(target, () => {
-            props.applyDelta(-nearest);
-            offset.value += -nearest * props.itemHeight;
-            velocity.value = 0;
-            rafId = null;
-          });
-          return;
-        }
-      }
-      velocity.value *= 0.92;
-    }
-
-    offset.value += velocity.value;
-    while (offset.value <= -props.itemHeight) {
-      const now = performance.now();
-      if (wheelActive && now - lastWheelApply < 120) break;
-      props.applyDelta(1);
-      lastWheelApply = now;
-      offset.value += props.itemHeight;
-    }
-    while (offset.value >= props.itemHeight) {
-      const now = performance.now();
-      if (wheelActive && now - lastWheelApply < 120) break;
-      props.applyDelta(-1);
-      lastWheelApply = now;
-      offset.value -= props.itemHeight;
-    }
-
-    rafId = requestAnimationFrame(step);
-  }
-
-  rafId = requestAnimationFrame(step);
-}
-
-function onWheel(e: WheelEvent) {
-  const sign = e.deltaY > 0 ? -1 : 1;
-  wheelActive = true;
-
-  const add =
-    sign * props.itemHeight * props.sensitivity * Math.min(1.0, Math.abs(e.deltaY) / 100) * 0.5;
-  velocity.value += add;
-  if (velocity.value >= VEL_MAX) velocity.value = VEL_MAX;
-  if (velocity.value <= -VEL_MAX) velocity.value = -VEL_MAX;
-  ensureAnimating();
-
-  if (wheelTimer) window.clearTimeout(wheelTimer);
-  wheelTimer = window.setTimeout(() => {
-    wheelActive = false;
-    wheelTimer = null;
-  }, 140);
-}
-
-function onPointerDown(e: PointerEvent) {
-  const el = (e.currentTarget as HTMLElement) || null;
-  try {
-    if (el) el.setPointerCapture(e.pointerId);
-  } catch {
-    /* ignore */
-  }
-
-  dragging = true;
-  startY = e.clientY;
-  lastY = e.clientY;
-  velocity.value = 0;
-
-  function onMove(ev: PointerEvent) {
-    const dy = ev.clientY - lastY;
-    lastY = ev.clientY;
-    offset.value += dy;
-
-    while (offset.value <= -props.itemHeight) {
-      props.applyDelta(1);
-      offset.value += props.itemHeight;
-    }
-    while (offset.value >= props.itemHeight) {
-      props.applyDelta(-1);
-      offset.value -= props.itemHeight;
-    }
-  }
-
-  function onUp(ev: PointerEvent) {
-    const total = ev.clientY - startY;
-    velocity.value = total * 0.25;
-    dragging = false;
-
-    try {
-      if (el) el.releasePointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-
-    window.removeEventListener('pointermove', onMove as any);
-    window.removeEventListener('pointerup', onUp as any);
-
-    ensureAnimating();
-  }
-
-  window.addEventListener('pointermove', onMove as any);
-  window.addEventListener('pointerup', onUp as any);
-}
-
-function itemStyle(rel: number) {
-  const dist = getItemDist(rel);
-  const opacity = Math.max(0, Math.min(1, 1 - dist / 2));
-  const scale = 1 - Math.min(0.12, dist * 0.06);
-  return {
-    opacity: String(opacity),
-    transform: `scale(${scale})`,
-  } as Record<string, string>;
-}
-
-function itemClass(rel: number) {
-  const dist = getItemDist(rel);
+function itemClass(index: number) {
+  const center = scrollTop.value / props.itemHeight;
+  const dist = Math.abs(index - center);
   if (dist < 0.5) return 'main';
   if (dist < 1.5) return 'near';
   return 'far';
 }
 
+function itemStyle(index: number) {
+  const center = scrollTop.value / props.itemHeight;
+  const dist = Math.abs(index - center);
+  const opacity = Math.max(0.15, 1 - dist / 2.5);
+  const scale = 1 - Math.min(0.15, dist * 0.07);
+  return {
+    opacity,
+    transform: `scale(${scale})`,
+  };
+}
+
+function animateScrollTo(target: number) {
+  const el = viewportRef.value;
+  if (!el) return;
+  if (animId != null) cancelAnimationFrame(animId);
+  const start = el.scrollTop;
+  const delta = target - start;
+  if (Math.abs(delta) < 1) { el.scrollTop = target; return; }
+  const duration = performance.now() - lastWheelTs < 150 ? 40 : 100;
+  const t0 = performance.now();
+  function step(now: number) {
+    const t = Math.min(1, (now - t0) / duration);
+    const ease = 0.5 - 0.5 * Math.cos(Math.PI * t);
+    const el2 = viewportRef.value;
+    if (!el2) { animId = null; return; }
+    el2.scrollTop = start + delta * ease;
+    scrollTop.value = el2.scrollTop;
+    if (t < 1) { animId = requestAnimationFrame(step); }
+    else { animId = null; el2.scrollTop = target; }
+  }
+  animId = requestAnimationFrame(step);
+}
+
+function doTeleport(raw: number) {
+  const el = viewportRef.value;
+  if (!el) return;
+  const norm = ((raw % total.value) + total.value) % total.value;
+  el.scrollTop = (norm + total.value) * props.itemHeight;
+  scrollTop.value = el.scrollTop;
+  if (norm !== props.modelValue) emit('update:modelValue', norm);
+}
+
+function snapOne(dir: 1 | -1) {
+  const el = viewportRef.value;
+  if (!el) return;
+  const raw = Math.round(el.scrollTop / props.itemHeight);
+  const next = raw + dir;
+  const t = total.value;
+  const norm = ((next % t) + t) % t;
+  if (next < 0 || next >= t * 3) {
+    el.scrollTop = (norm + t) * props.itemHeight;
+    scrollTop.value = el.scrollTop;
+  } else {
+    animateScrollTo(next * props.itemHeight);
+  }
+  if (norm !== props.modelValue) emit('update:modelValue', norm);
+}
+
+function onWheel(e: WheelEvent) {
+  if (Math.abs(e.deltaY) < 10) return;
+  e.preventDefault();
+  lastWheelTs = performance.now();
+  snapOne(e.deltaY > 0 ? 1 : -1);
+}
+
+function onScroll() {
+  const el = viewportRef.value;
+  if (!el) return;
+  scrollTop.value = el.scrollTop;
+  const raw = Math.round(el.scrollTop / props.itemHeight);
+  const t = total.value;
+  if (!touching && (raw < 2 || raw >= t * 3 - 2)) {
+    doTeleport(raw);
+    return;
+  }
+  if (scrollTimer) clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(() => {
+    if (animId != null) { scrollTimer = null; return; }
+    const raw2 = Math.round(el.scrollTop / props.itemHeight);
+    const snapTarget = raw2 * props.itemHeight;
+    const t2 = total.value;
+    const norm = ((raw2 % t2) + t2) % t2;
+    if (raw2 < 2 || raw2 >= t2 * 3 - 2) {
+      doTeleport(raw2);
+    } else if (Math.abs(el.scrollTop - snapTarget) > 2) {
+      animateScrollTo(snapTarget);
+      scrollTimer = null;
+      return;
+    }
+    if (norm !== props.modelValue) emit('update:modelValue', norm);
+    scrollTimer = null;
+  }, 80);
+}
+
+onMounted(() => {
+  const el = viewportRef.value;
+  if (!el) return;
+  el.scrollTop = (props.modelValue + total.value) * props.itemHeight;
+  scrollTop.value = el.scrollTop;
+  el.addEventListener('scroll', onScroll, { passive: true });
+  el.addEventListener('pointerdown', () => { touching = true; });
+  el.addEventListener('pointerup', () => { touching = false; });
+});
+
+watch(total, () => {
+  const el = viewportRef.value;
+  if (!el) return;
+  const v = Math.min(props.modelValue, total.value - 1);
+  el.scrollTop = (v + total.value) * props.itemHeight;
+  scrollTop.value = el.scrollTop;
+});
+
+watch(() => props.modelValue, (v) => {
+  const el = viewportRef.value;
+  if (!el) return;
+  const target = (v + total.value) * props.itemHeight;
+  if (Math.abs(el.scrollTop - target) > 1) {
+    animateScrollTo(target);
+  }
+});
+
 onBeforeUnmount(() => {
-  if (rafId) cancelAnimationFrame(rafId);
+  if (scrollTimer) clearTimeout(scrollTimer);
+  if (animId) cancelAnimationFrame(animId);
 });
 </script>
 
@@ -210,63 +179,63 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  box-sizing: border-box;
-  margin: 0 6px;
   position: relative;
   --item-h: 36px;
   height: calc(var(--item-h) * 5);
   overflow: hidden;
 }
-.roller-items {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  transition: none;
-  will-change: transform;
+.roller-viewport {
+  height: 100%;
+  width: 100%;
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  touch-action: pan-y;
+}
+.roller-viewport::-webkit-scrollbar {
+  display: none;
+}
+.roller-track {
+  padding: calc(var(--item-h) * 2) 0;
 }
 .roller-item {
-  display: block;
-  width: 100%;
-  text-align: center;
-  padding: 6px 4px;
-  box-sizing: border-box;
-  transition:
-    transform 160ms ease,
-    opacity 160ms ease;
   height: var(--item-h);
-  line-height: var(--item-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  color: #aaa;
+  box-sizing: border-box;
+  line-height: 1;
 }
 .roller-item.main {
   font-size: 1.2rem;
   color: #409eff;
   font-weight: 700;
-  background: #f5f7fa;
-  border-radius: 6px;
   opacity: 1;
 }
 .roller-item.near {
   font-size: 1rem;
   color: #6b9fdc;
 }
-.roller-item.far {
-  font-size: 0.95rem;
-  color: #aaa;
-}
 .picker-frame {
   position: absolute;
-  left: 6px;
-  right: 6px;
+  left: 0;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
   height: var(--item-h);
   border-radius: 6px;
   pointer-events: none;
-  box-shadow: inset 0 0 0 1px rgba(64, 158, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(64, 158, 255, 0.12);
 }
 .roller-unit {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: #888;
   margin-top: 2px;
+  line-height: 1;
 }
 .col-year {
   flex: 0 0 20%;
