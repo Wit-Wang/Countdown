@@ -14,19 +14,24 @@
         <div class="main-time" :style="{ color: urgency.color }">{{ timeMain }}</div>
       </div>
       <div class="action-btns">
-        <button class="icon-btn" title="完成" @click.stop="onComplete">
-          <svg viewBox="0 0 24 24" width="16" height="16">
-            <path d="M20 6L9 17l-5-5" fill="none" stroke="#888" stroke-width="2" />
+        <button v-if="todo.repeat && !todo.autoExpire" class="icon-btn" title="完成" @click.stop="onComplete">
+          <svg viewBox="0 0 24 24" width="16" height="16" color="#888">
+            <path :d="mdiCheck" fill="currentColor" />
+          </svg>
+        </button>
+        <button v-if="todo.info" class="icon-btn" title="备注" @click.stop="showInfo">
+          <svg viewBox="0 0 24 24" width="16" height="16" color="#888">
+            <path :d="mdiInformationOutline" fill="currentColor" />
           </svg>
         </button>
         <button class="icon-btn" title="编辑" @click.stop="onEdit">
-          <svg viewBox="0 0 24 24" width="16" height="16">
-            <path d="M3 17.25V21h3.75l11.06-11.06-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="none" stroke="#888" stroke-width="2" />
+          <svg viewBox="0 0 24 24" width="16" height="16" color="#888">
+            <path :d="mdiPencil" fill="currentColor" />
           </svg>
         </button>
         <button class="icon-btn" title="删除" @click.stop="onRemove">
-          <svg viewBox="0 0 24 24" width="16" height="16">
-            <path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="none" stroke="#888" stroke-width="2" />
+          <svg viewBox="0 0 24 24" width="16" height="16" color="#888">
+            <path :d="mdiDelete" fill="currentColor" />
           </svg>
         </button>
       </div>
@@ -40,6 +45,7 @@ import { now } from '../clock';
 import type { Todo, DateTime } from '../types/interface';
 import { URGENCY } from '../types/interface';
 import { dateTimeToTs, formatDateTime } from '../utils/datetime';
+import { mdiCheck, mdiInformationOutline, mdiPencil, mdiDelete } from '@mdi/js';
 
 const props = defineProps<{ todo: Todo }>();
 const emit = defineEmits(['remove', 'edit', 'complete']);
@@ -47,6 +53,7 @@ const emit = defineEmits(['remove', 'edit', 'complete']);
 function onRemove() { emit('remove', props.todo.id); }
 function onEdit() { emit('edit', props.todo); }
 function onComplete() { emit('complete', props.todo.id); }
+function showInfo() { alert(props.todo.info); }
 
 function getUrgency(deadline: DateTime) {
   const diff = dateTimeToTs(deadline) - now.value;

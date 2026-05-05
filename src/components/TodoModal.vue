@@ -1,45 +1,34 @@
 <template>
-  <div class="modal-mask center-modal" @click.self="close">
-    <div class="modal-container center-modal">
-      <div class="modal-header">
-        <span>{{ isEditing ? '编辑待办事项' : '新建待办事项' }}</span>
-        <div class="modal-actions">
-          <button class="window-btn" @click="close">
-            <svg viewBox="0 0 24 24" width="18" height="18">
-              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" fill="none" stroke="#888" stroke-width="2"/>
-            </svg>
-          </button>
+  <BaseModal :title="isEditing ? '编辑待办事项' : '新建待办事项'" @close="close">
+    <form class="modal-form" @submit.prevent="submit">
+      <input v-model="text" placeholder="事项内容" class="modal-input" maxlength="200">
+      <div class="datetime-row">
+        <PickerColumn :labels="yearLabels" v-model="yearIndex" unit="年" class="col-year" />
+        <PickerColumn :labels="monthLabels" v-model="monthIndex" unit="月" class="col-month" />
+        <PickerColumn :labels="dayLabels" v-model="dayIndex" unit="日" class="col-day" />
+        <PickerColumn :labels="hourLabels" v-model="hourIndex" unit="时" class="col-hour" />
+        <PickerColumn :labels="minuteLabels" v-model="minuteIndex" unit="分" class="col-minute" />
+      </div>
+      <div class="repeat-row">
+        <div class="auto-expire-btn" :class="{ active: autoExpire }" @click="autoExpire = !autoExpire">
+          <span class="auto-expire-text">自动截止</span>
+        </div>
+        <label class="repeat-label">重复</label>
+        <div style="flex: 1; display: flex; align-items: center">
+          <PickerColumn :labels="repeatLabels" v-model="repeatModelIndex" class="col-repeat" :itemHeight="28" />
         </div>
       </div>
-      <form class="modal-form" @submit.prevent="submit">
-        <input v-model="text" placeholder="事项内容" class="modal-input" maxlength="200">
-        <div class="datetime-row">
-          <PickerColumn :labels="yearLabels" v-model="yearIndex" unit="年" class="col-year" />
-          <PickerColumn :labels="monthLabels" v-model="monthIndex" unit="月" class="col-month" />
-          <PickerColumn :labels="dayLabels" v-model="dayIndex" unit="日" class="col-day" />
-          <PickerColumn :labels="hourLabels" v-model="hourIndex" unit="时" class="col-hour" />
-          <PickerColumn :labels="minuteLabels" v-model="minuteIndex" unit="分" class="col-minute" />
-        </div>
-        <div class="repeat-row">
-          <label class="repeat-label">重复</label>
-          <div style="flex: 1; display: flex; align-items: center">
-            <PickerColumn :labels="repeatLabels" v-model="repeatModelIndex" class="col-repeat" :itemHeight="28" />
-          </div>
-          <div class="auto-expire-btn" :class="{ active: autoExpire }" @click="autoExpire = !autoExpire">
-            <span class="auto-expire-text">自动截止</span>
-          </div>
-        </div>
-        <textarea v-model="info" class="info-textarea" placeholder="备注信息（可选）" rows="3" />
-        <button class="main-btn" type="submit" :aria-label="isEditing ? '保存' : '创建'">
-          {{ isEditing ? '保存' : '创建' }}
-        </button>
-      </form>
-    </div>
-  </div>
+      <textarea v-model="info" class="info-textarea" placeholder="备注信息（可选）" rows="3" />
+      <button class="main-btn" type="submit" :aria-label="isEditing ? '保存' : '创建'">
+        {{ isEditing ? '保存' : '创建' }}
+      </button>
+    </form>
+  </BaseModal>
 </template>
 
 <script lang="ts" setup>
 import { ref, computed, watch } from 'vue';
+import BaseModal from './BaseModal.vue';
 import PickerColumn from './PickerColumn.vue';
 import type { DateTime } from '../types/interface';
 import { REPEAT_OPTIONS, REPEAT_KEYS } from '../constants/repeatOptions';
@@ -63,7 +52,7 @@ const hour = ref(now.getHours());
 const minute = ref((Math.round(now.getMinutes() / 5) * 5) % 60);
 
 const yearLabels = computed(() =>
-  Array.from({ length: 101 }, (_, i) => String(2000 + i))
+  Array.from({ length: 21 }, (_, i) => String(2020 + i))
 );
 const monthLabels = computed(() =>
   Array.from({ length: 12 }, (_, i) => pad(i + 1))
@@ -81,8 +70,8 @@ const minuteLabels = computed(() =>
 const repeatLabels = REPEAT_KEYS.map(k => REPEAT_OPTIONS[k].label);
 
 const yearIndex = computed({
-  get: () => year.value - 2000,
-  set: v => { year.value = 2000 + v; },
+  get: () => year.value - 2020,
+  set: v => { year.value = 2020 + v; },
 });
 const monthIndex = computed({
   get: () => month.value - 1,
@@ -217,6 +206,7 @@ function close() {
 }
 .repeat-label {
   color: #666;
+  padding-left: 28px;
   font-size: 14px;
   width: 56px;
 }

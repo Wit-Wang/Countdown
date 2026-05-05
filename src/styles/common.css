@@ -59,6 +59,23 @@ input, textarea, select, .modal-input {
 
 /* Keep this file minimal: only truly shared rules go here */
 
+/* Form input base style */
+.form-input {
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 14px;
+  background: #ffffff;
+  color: #222;
+  outline: none;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+.form-input:focus {
+  border-color: #409eff;
+}
+
 /* Safe area insets for notched mobile devices */
 @supports (padding: env(safe-area-inset-bottom)) {
   .todo-list-inner {
@@ -68,9 +85,6 @@ input, textarea, select, .modal-input {
     padding-top: calc(4px + env(safe-area-inset-top)) !important;
   }
   .fab {
-    bottom: calc(var(--fab-offset) + env(safe-area-inset-bottom)) !important;
-  }
-  .fab-sync {
     bottom: calc(var(--fab-offset) + env(safe-area-inset-bottom)) !important;
   }
 }

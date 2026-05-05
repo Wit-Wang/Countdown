@@ -1,9 +1,9 @@
 <template>
   <div class="roller-col" :style="{ '--item-h': itemHeight + 'px' }">
-    <div class="roller-viewport" ref="viewportRef" @wheel="onWheel">
+    <div class="roller-viewport" ref="viewportRef" @wheel="onWheel" @pointerdown="onPointerDown" @pointerup="onPointerUp" @pointerleave="onPointerUp">
       <div class="roller-track">
         <div
-          v-for="(label, index) in tripleLabels"
+          v-for="(label, index) in labels"
           :key="index"
           class="roller-item"
           :class="itemClass(index)"
@@ -31,41 +31,59 @@ const emit = defineEmits(['update:modelValue']);
 
 const viewportRef = ref<HTMLElement | null>(null);
 const scrollTop = ref(0);
-let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+let snapTimer: ReturnType<typeof setTimeout> | null = null;
 let animId: number | null = null;
 let touching = false;
-let lastWheelTs = 0;
 
 const total = computed(() => props.labels.length);
-const tripleLabels = computed(() => [...props.labels, ...props.labels, ...props.labels]);
+const maxScroll = computed(() => Math.max(0, (total.value - 1) * props.itemHeight));
+const minScroll = 0;
+
+const centerIndex = computed(() => {
+  const raw = Math.round(scrollTop.value / props.itemHeight);
+  return Math.max(0, Math.min(total.value - 1, raw));
+});
 
 function itemClass(index: number) {
-  const center = scrollTop.value / props.itemHeight;
-  const dist = Math.abs(index - center);
-  if (dist < 0.5) return 'main';
-  if (dist < 1.5) return 'near';
+  const c = centerIndex.value;
+  const dist = Math.abs(index - c);
+  if (dist === 0) return 'main';
+  if (dist === 1) return 'near';
   return 'far';
 }
 
 function itemStyle(index: number) {
-  const center = scrollTop.value / props.itemHeight;
-  const dist = Math.abs(index - center);
+  const c = scrollTop.value / props.itemHeight;
+  const dist = Math.abs(index - c);
   const opacity = Math.max(0.15, 1 - dist / 2.5);
   const scale = 1 - Math.min(0.15, dist * 0.07);
-  return {
-    opacity,
-    transform: `scale(${scale})`,
-  };
+  return { opacity, transform: `scale(${scale})` };
+}
+
+function clamp(v: number): number {
+  return Math.max(minScroll, Math.min(maxScroll.value, v));
+}
+
+function snap() {
+  const el = viewportRef.value;
+  if (!el) return;
+  const target = centerIndex.value * props.itemHeight;
+  if (Math.abs(el.scrollTop - target) > 1) {
+    animateScrollTo(target);
+  }
+  const norm = centerIndex.value;
+  if (norm !== props.modelValue) emit('update:modelValue', norm);
 }
 
 function animateScrollTo(target: number) {
   const el = viewportRef.value;
   if (!el) return;
   if (animId != null) cancelAnimationFrame(animId);
+  target = clamp(target);
   const start = el.scrollTop;
   const delta = target - start;
-  if (Math.abs(delta) < 1) { el.scrollTop = target; return; }
-  const duration = performance.now() - lastWheelTs < 150 ? 40 : 100;
+  if (Math.abs(delta) < 1) return;
+  const duration = 120;
   const t0 = performance.now();
   function step(now: number) {
     const t = Math.min(1, (now - t0) / duration);
@@ -80,96 +98,69 @@ function animateScrollTo(target: number) {
   animId = requestAnimationFrame(step);
 }
 
-function doTeleport(raw: number) {
-  const el = viewportRef.value;
-  if (!el) return;
-  const norm = ((raw % total.value) + total.value) % total.value;
-  el.scrollTop = (norm + total.value) * props.itemHeight;
-  scrollTop.value = el.scrollTop;
-  if (norm !== props.modelValue) emit('update:modelValue', norm);
-}
-
-function snapOne(dir: 1 | -1) {
-  const el = viewportRef.value;
-  if (!el) return;
-  const raw = Math.round(el.scrollTop / props.itemHeight);
-  const next = raw + dir;
-  const t = total.value;
-  const norm = ((next % t) + t) % t;
-  if (next < 0 || next >= t * 3) {
-    el.scrollTop = (norm + t) * props.itemHeight;
-    scrollTop.value = el.scrollTop;
-  } else {
-    animateScrollTo(next * props.itemHeight);
-  }
-  if (norm !== props.modelValue) emit('update:modelValue', norm);
-}
-
 function onWheel(e: WheelEvent) {
   if (Math.abs(e.deltaY) < 10) return;
   e.preventDefault();
-  lastWheelTs = performance.now();
-  snapOne(e.deltaY > 0 ? 1 : -1);
+  const el = viewportRef.value;
+  if (!el) return;
+  const target = clamp(el.scrollTop + (e.deltaY > 0 ? props.itemHeight : -props.itemHeight));
+  animateScrollTo(target);
+  if (snapTimer) clearTimeout(snapTimer);
+  snapTimer = setTimeout(snap, 80);
+}
+
+function onPointerDown() {
+  touching = true;
+  if (snapTimer) clearTimeout(snapTimer);
+  if (animId != null) { cancelAnimationFrame(animId); animId = null; }
+}
+
+function onPointerUp() {
+  touching = false;
+  snap();
 }
 
 function onScroll() {
   const el = viewportRef.value;
   if (!el) return;
   scrollTop.value = el.scrollTop;
-  const raw = Math.round(el.scrollTop / props.itemHeight);
-  const t = total.value;
-  if (!touching && (raw < 2 || raw >= t * 3 - 2)) {
-    doTeleport(raw);
-    return;
-  }
-  if (scrollTimer) clearTimeout(scrollTimer);
-  scrollTimer = setTimeout(() => {
-    if (animId != null) { scrollTimer = null; return; }
-    const raw2 = Math.round(el.scrollTop / props.itemHeight);
-    const snapTarget = raw2 * props.itemHeight;
-    const t2 = total.value;
-    const norm = ((raw2 % t2) + t2) % t2;
-    if (raw2 < 2 || raw2 >= t2 * 3 - 2) {
-      doTeleport(raw2);
-    } else if (Math.abs(el.scrollTop - snapTarget) > 2) {
-      animateScrollTo(snapTarget);
-      scrollTimer = null;
-      return;
+  if (!touching) {
+    if (el.scrollTop < 0 || el.scrollTop > maxScroll.value) {
+      el.scrollTop = clamp(el.scrollTop);
+      scrollTop.value = el.scrollTop;
     }
-    if (norm !== props.modelValue) emit('update:modelValue', norm);
-    scrollTimer = null;
-  }, 80);
+    if (snapTimer) clearTimeout(snapTimer);
+    snapTimer = setTimeout(snap, 120);
+  }
 }
 
 onMounted(() => {
   const el = viewportRef.value;
   if (!el) return;
-  el.scrollTop = (props.modelValue + total.value) * props.itemHeight;
+  el.scrollTop = clamp(props.modelValue * props.itemHeight);
   scrollTop.value = el.scrollTop;
   el.addEventListener('scroll', onScroll, { passive: true });
-  el.addEventListener('pointerdown', () => { touching = true; });
-  el.addEventListener('pointerup', () => { touching = false; });
 });
 
 watch(total, () => {
   const el = viewportRef.value;
   if (!el) return;
   const v = Math.min(props.modelValue, total.value - 1);
-  el.scrollTop = (v + total.value) * props.itemHeight;
+  el.scrollTop = clamp(v * props.itemHeight);
   scrollTop.value = el.scrollTop;
 });
 
 watch(() => props.modelValue, (v) => {
   const el = viewportRef.value;
   if (!el) return;
-  const target = (v + total.value) * props.itemHeight;
+  const target = clamp(v * props.itemHeight);
   if (Math.abs(el.scrollTop - target) > 1) {
     animateScrollTo(target);
   }
 });
 
 onBeforeUnmount(() => {
-  if (scrollTimer) clearTimeout(scrollTimer);
+  if (snapTimer) clearTimeout(snapTimer);
   if (animId) cancelAnimationFrame(animId);
 });
 </script>
@@ -181,7 +172,7 @@ onBeforeUnmount(() => {
   align-items: center;
   position: relative;
   --item-h: 36px;
-  height: calc(var(--item-h) * 5);
+  height: calc(var(--item-h) * 3);
   overflow: hidden;
 }
 .roller-viewport {
@@ -198,7 +189,7 @@ onBeforeUnmount(() => {
   display: none;
 }
 .roller-track {
-  padding: calc(var(--item-h) * 2) 0;
+  padding: calc(var(--item-h) * 1) 0;
 }
 .roller-item {
   height: var(--item-h);
